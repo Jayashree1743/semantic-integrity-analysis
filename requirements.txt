@@ -1,0 +1,11 @@
+pdfplumber
+python-docx
+spacy
+sentence-transformers
+faiss-cpu
+numpy
+streamlit
+transformers
+torch
+huggingface_hub
+reportlab
