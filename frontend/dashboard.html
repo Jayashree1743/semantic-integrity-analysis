@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Analysis | LegalSI</title>
+    <title>Dashboard | LegalSI</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -18,9 +18,9 @@
         <a class="brand" href="index.html#home">LegalSI</a>
         <div class="page-links">
           <a class="page-link" href="upload.html">Upload</a>
-          <a class="page-link active" href="issues.html">Analysis</a>
+          <a class="page-link" href="issues.html">Analysis</a>
           <a class="page-link" href="summary.html">Summary</a>
-          <a class="page-link" href="dashboard.html">Dashboard</a>
+          <a class="page-link active" href="dashboard.html">Dashboard</a>
           <button id="logoutBtn" class="logout-btn" type="button">Logout</button>
         </div>
       </div>
@@ -29,17 +29,22 @@
     <main class="flow-main">
       <section class="container flow-card">
         <div class="upload-header">
-          <h1>Line-Level Analysis</h1>
+          <h1>Final Error Dashboard</h1>
           <span id="userBadge" class="user-badge"></span>
         </div>
-        <p class="upload-subtitle">Inconsistencies, contradictions, and duplications with page and line references.</p>
+        <p class="upload-subtitle">Each error is shown in simple format: what is wrong, original line, your final line, and how to rectify.</p>
 
-        <div id="issueStats" class="stats-grid"></div>
-        <div id="lineIssueTables"></div>
+        <h3 class="section-subtitle">Line Error Table</h3>
+        <article class="result-card">
+          <div id="lineErrorDashboard"></div>
+        </article>
+
+        <h3 class="section-subtitle">Reference vs Final Comparison</h3>
+        <div id="comparisonBoard" class="result-list"></div>
 
         <div class="workflow-actions">
-          <a class="secondary-btn as-link" href="upload.html">Back to Upload</a>
-          <a class="submit-btn as-link submit-link" href="summary.html">Next: Summary</a>
+          <a class="secondary-btn as-link" href="summary.html">Back to Summary</a>
+          <a class="submit-btn as-link submit-link" href="upload.html">Analyze New Document</a>
         </div>
       </section>
     </main>

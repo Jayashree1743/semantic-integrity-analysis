@@ -926,6 +926,30 @@ body {
   font-size: 14px;
 }
 
+.comparison-card {
+  border-left: 4px solid #2d6ec8;
+}
+
+.compare-text {
+  border: 1px solid #d2e2f2;
+  border-radius: 10px;
+  padding: 8px;
+  background: #ffffff;
+  white-space: pre-wrap;
+  line-height: 1.55;
+  color: #1a3d61;
+}
+
+.rectify-btn {
+  min-width: 170px;
+}
+
+.rectify-hint {
+  font-size: 12px;
+  color: #496787;
+  align-self: center;
+}
+
 .as-link {
   text-decoration: none;
   display: inline-flex;

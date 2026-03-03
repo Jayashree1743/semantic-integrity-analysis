@@ -75,6 +75,10 @@ function setAnalysisPayload(payload) {
   sessionStorage.setItem("lsi_analysis_payload", JSON.stringify(payload));
 }
 
+function normalizeSpaces(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
 function ensureAuth() {
   const user = getUser();
   if (!user) {
@@ -273,22 +277,48 @@ function initUploadPage() {
 
   const uploadForm = document.getElementById("uploadForm");
   const legalFile = document.getElementById("legalFile");
+  const referenceFiles = document.getElementById("referenceFiles");
   const scanMode = document.getElementById("scanMode");
   const uploadMessage = document.getElementById("uploadMessage");
   const loadingState = document.getElementById("loadingState");
   const analysisInputSummary = document.getElementById("analysisInputSummary");
 
-  legalFile.addEventListener("change", () => {
+  function renderUploadSummary() {
     if (!legalFile.files || !legalFile.files[0]) return;
     const selectedFile = legalFile.files[0];
+    const refs = Array.from((referenceFiles && referenceFiles.files) ? referenceFiles.files : []).slice(0, 2);
+    const refNames = refs.length ? refs.map((f) => escapeHtml(f.name)).join(", ") : "None";
+
     analysisInputSummary.classList.remove("hidden");
     analysisInputSummary.innerHTML = `
-      <p><strong>File:</strong> ${escapeHtml(selectedFile.name)}</p>
-      <p><strong>Type:</strong> ${escapeHtml(selectedFile.type || "unknown")}</p>
-      <p><strong>Size:</strong> ${escapeHtml((selectedFile.size / 1024).toFixed(2))} KB</p>
+      <p><strong>Final File:</strong> ${escapeHtml(selectedFile.name)}</p>
+      <p><strong>Final Type:</strong> ${escapeHtml(selectedFile.type || "unknown")}</p>
+      <p><strong>Final Size:</strong> ${escapeHtml((selectedFile.size / 1024).toFixed(2))} KB</p>
+      <p><strong>Reference Docs:</strong> ${refs.length}</p>
+      <p><strong>Reference Names:</strong> ${refNames}</p>
       <p><strong>Scan Mode:</strong> ${escapeHtml(scanMode.value)}</p>
     `;
-    setText(uploadMessage, `Selected: ${selectedFile.name}`, "success");
+    setText(uploadMessage, `Final document selected: ${selectedFile.name}`, "success");
+  }
+
+  legalFile.addEventListener("change", () => {
+    renderUploadSummary();
+  });
+
+  if (referenceFiles) {
+    referenceFiles.addEventListener("change", () => {
+      const refs = Array.from(referenceFiles.files || []);
+      if (refs.length > 2) {
+        setText(uploadMessage, "Please select at most 2 reference documents.", "error");
+        referenceFiles.value = "";
+        return;
+      }
+      renderUploadSummary();
+    });
+  }
+
+  scanMode.addEventListener("change", () => {
+    renderUploadSummary();
   });
 
   uploadForm.addEventListener("submit", async (event) => {
@@ -302,10 +332,16 @@ function initUploadPage() {
 
     const selectedFile = legalFile.files[0];
     const selectedScanMode = scanMode.value;
+    const refs = Array.from((referenceFiles && referenceFiles.files) ? referenceFiles.files : []);
+    if (refs.length > 2) {
+      setText(uploadMessage, "You can upload up to 2 reference documents.", "error");
+      return;
+    }
 
     const formData = new FormData();
     formData.append("file", selectedFile);
     formData.append("scanMode", selectedScanMode);
+    refs.forEach((file) => formData.append("referenceFiles", file));
 
     uploadForm.classList.add("hidden");
     loadingState.classList.remove("hidden");
@@ -316,6 +352,7 @@ function initUploadPage() {
         fileName: selectedFile.name,
         fileType: selectedFile.type || "unknown",
         fileSizeKb: Number((selectedFile.size / 1024).toFixed(2)),
+        referenceFiles: refs.map((f) => f.name),
       };
       setAnalysisPayload(payload);
       window.location.href = "issues.html";
@@ -337,7 +374,11 @@ function initIssuesPage() {
   }
 
   const summary = payload.summary || {};
-  const lineIssues = Array.isArray(payload.lineIssues) ? payload.lineIssues : [];
+  const lineIssues = Array.isArray(payload.finalLineIssues)
+    ? payload.finalLineIssues
+    : Array.isArray(payload.lineIssues)
+      ? payload.lineIssues
+      : [];
 
   const issueStats = document.getElementById("issueStats");
   issueStats.innerHTML = `
@@ -384,7 +425,11 @@ function initSummaryPage() {
   const summary = payload.summary || {};
   const findings = Array.isArray(payload.findings) ? payload.findings : [];
   const pageSummaries = Array.isArray(payload.pageSummaries) ? payload.pageSummaries : [];
-  const lineIssues = Array.isArray(payload.lineIssues) ? payload.lineIssues : [];
+  const lineIssues = Array.isArray(payload.finalLineIssues)
+    ? payload.finalLineIssues
+    : Array.isArray(payload.lineIssues)
+      ? payload.lineIssues
+      : [];
   const detailedSummary = String(payload.detailedSummary || "").trim();
   const meta = payload._meta || {};
 
@@ -398,12 +443,12 @@ function initSummaryPage() {
     <article class="summary-item"><span>Clauses</span><strong>${escapeHtml(summary.clauses ?? 0)}</strong></article>
     <article class="summary-item"><span>Pairs Compared</span><strong>${escapeHtml(summary.pairsCompared ?? 0)}</strong></article>
     <article class="summary-item"><span>Total Issues</span><strong>${escapeHtml(summary.issuesFound ?? 0)}</strong></article>
+    <article class="summary-item"><span>Reference Docs</span><strong>${escapeHtml(summary.referenceDocs ?? 0)}</strong></article>
   `;
 
   const findingsBoard = document.getElementById("findingsBoard");
   const pageSummaryBoard = document.getElementById("pageSummaryBoard");
   const detailedSummaryText = document.getElementById("detailedSummaryText");
-  const lineErrorDashboard = document.getElementById("lineErrorDashboard");
 
   if (detailedSummaryText) {
     detailedSummaryText.textContent = detailedSummary || "Detailed summary is not available for this document.";
@@ -456,43 +501,154 @@ function initSummaryPage() {
     )
     .join("");
 
+}
+
+function initDashboardPage() {
+  if (!ensureAuth()) return;
+
+  const payload = getAnalysisPayload();
+  if (!payload) {
+    window.location.href = "upload.html";
+    return;
+  }
+
+  const findings = Array.isArray(payload.findings) ? payload.findings : [];
+  const lineIssues = Array.isArray(payload.finalLineIssues)
+    ? payload.finalLineIssues
+    : Array.isArray(payload.lineIssues)
+      ? payload.lineIssues
+      : [];
+
+  const lineErrorDashboard = document.getElementById("lineErrorDashboard");
+  const comparisonBoard = document.getElementById("comparisonBoard");
+
   if (lineErrorDashboard) {
     if (lineIssues.length === 0) {
       lineErrorDashboard.innerHTML = `<p class="result-muted">No line-level errors detected.</p>`;
+    } else {
+      const rows = lineIssues
+        .slice(0, 200)
+        .map(
+          (item) => `
+          <tr>
+            <td>${escapeHtml(item.location || `Pg ${item.page}, Ln ${item.line}`)}</td>
+            <td>${escapeHtml(item.category || "-")}</td>
+            <td>${escapeHtml(item.issueType || "-")}</td>
+            <td>${escapeHtml(item.confidence ?? "-")}</td>
+            <td>${escapeHtml(item.reason || "-")}</td>
+          </tr>
+        `
+        )
+        .join("");
+
+      lineErrorDashboard.innerHTML = `
+        <div class="table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>Page/Line</th>
+                <th>Category</th>
+                <th>Issue Type</th>
+                <th>Confidence</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+  }
+
+  if (comparisonBoard) {
+    const crossFindings = findings
+      .filter((f) => String(f.source1 || "").startsWith("reference_") || String(f.source2 || "").startsWith("reference_"))
+      .slice(0, 80);
+
+    if (!crossFindings.length) {
+      comparisonBoard.innerHTML = `<article class="result-card"><p class="result-muted">Reference vs Final cross-verification mismatches not found.</p></article>`;
       return;
     }
 
-    const rows = lineIssues
-      .slice(0, 200)
-      .map(
-        (item) => `
-        <tr>
-          <td>${escapeHtml(item.location || `Pg ${item.page}, Ln ${item.line}`)}</td>
-          <td>${escapeHtml(item.category || "-")}</td>
-          <td>${escapeHtml(item.issueType || "-")}</td>
-          <td>${escapeHtml(item.confidence ?? "-")}</td>
-          <td>${escapeHtml(item.reason || "-")}</td>
-        </tr>
-      `
-      )
+    function suggestionFor(category, issueType, refText, finalText) {
+      const c = String(category || "").toLowerCase();
+      const i = String(issueType || "").toLowerCase();
+      if (c === "duplication" || i.includes("duplication")) {
+        return "இந்த clause repeated/near-duplicate. ஒரே legal meaning உள்ள line-ஐ மட்டும் வைத்துக்கொண்டு மற்றதை remove செய்யவும்.";
+      }
+      if (c === "inconsistency" || i.includes("inconsistency") || i.includes("numeric")) {
+        return "Number/term mismatch இருக்கு. Reference document value-ஐ verify பண்ணி final document-ல் same value update செய்யவும்.";
+      }
+      if (c === "contradiction" || i.includes("conflict") || i.includes("contradiction")) {
+        return "இரண்டு lines opposite meaning கொடுக்குது. Reference document intent எது சரி என்று confirm செய்து final document line-ஐ அதற்கு align செய்யவும்.";
+      }
+      if (String(refText || "").trim() && String(finalText || "").trim()) {
+        return "Reference line மற்றும் final line legal intent same ஆக இருக்கிறதா verify செய்து, ambiguous words remove செய்து rewrite செய்யவும்.";
+      }
+      return "Clause wording-ஐ reference document-ஓடு compare செய்து consistent version-ஆ மாற்றவும்.";
+    }
+
+    comparisonBoard.innerHTML = crossFindings
+      .map((item) => {
+        const source1 = String(item.source1 || "");
+        const source2 = String(item.source2 || "");
+        const firstIsFinal = source1 === "final";
+        const finalText = firstIsFinal ? item.clause1 : item.clause2;
+        const refText = firstIsFinal ? item.clause2 : item.clause1;
+        const finalLoc = firstIsFinal ? item.location1 : item.location2;
+        const refLoc = firstIsFinal ? item.location2 : item.location1;
+        const refLabel = firstIsFinal ? item.sourceLabel2 : item.sourceLabel1;
+        const fixSuggestion = suggestionFor(item.category, item.issueType, refText, finalText);
+        return `
+          <article class="result-card comparison-card">
+            <h4>Error at ${escapeHtml(finalLoc || "-")}</h4>
+            <p><strong>Type:</strong> ${escapeHtml(item.category || "issue")} - ${escapeHtml(item.issueType || "-")}</p>
+            <p><strong>What is wrong:</strong> ${escapeHtml(item.reason || "-")}</p>
+            <p><strong>Original (${escapeHtml(refLabel || "Reference")} - ${escapeHtml(refLoc || "-")}):</strong></p>
+            <p class="compare-text">${escapeHtml(refText || "-")}</p>
+            <p><strong>Your Final Document (${escapeHtml(finalLoc || "-")}):</strong></p>
+            <p class="compare-text">${escapeHtml(finalText || "-")}</p>
+            <p><strong>How to rectify:</strong> ${escapeHtml(fixSuggestion)}</p>
+            <div class="workflow-actions">
+              <button
+                type="button"
+                class="secondary-btn rectify-btn"
+                data-ref-text="${escapeHtml(normalizeSpaces(refText || ""))}"
+                data-final-text="${escapeHtml(normalizeSpaces(finalText || ""))}"
+              >
+                Rectify this line
+              </button>
+              <span class="rectify-hint">Suggested corrected line will be copied.</span>
+            </div>
+          </article>
+        `;
+      })
       .join("");
 
-    lineErrorDashboard.innerHTML = `
-      <div class="table-wrap">
-        <table class="result-table">
-          <thead>
-            <tr>
-              <th>Page/Line</th>
-              <th>Category</th>
-              <th>Issue Type</th>
-              <th>Confidence</th>
-              <th>Reason</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    `;
+    const rectifyButtons = comparisonBoard.querySelectorAll(".rectify-btn");
+    rectifyButtons.forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const refLine = normalizeSpaces(btn.getAttribute("data-ref-text") || "");
+        const finalLine = normalizeSpaces(btn.getAttribute("data-final-text") || "");
+        const suggestion = refLine || finalLine || "Review this clause with reference document and update wording for consistency.";
+
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(suggestion);
+          }
+          const hint = btn.parentElement && btn.parentElement.querySelector(".rectify-hint");
+          if (hint) {
+            hint.textContent = "Corrected line copied. Paste into your final document.";
+          }
+          btn.textContent = "Copied";
+        } catch {
+          const hint = btn.parentElement && btn.parentElement.querySelector(".rectify-hint");
+          if (hint) {
+            hint.textContent = `Suggested line: ${suggestion}`;
+          }
+        }
+      });
+    });
   }
 }
 
@@ -504,6 +660,8 @@ if (page === "index.html" || page === "") {
   initIssuesPage();
 } else if (page === "summary.html") {
   initSummaryPage();
+} else if (page === "dashboard.html") {
+  initDashboardPage();
 } else if (page === "workflow.html") {
   window.location.href = "upload.html";
 }

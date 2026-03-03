@@ -87,11 +87,11 @@ def _extract_text_data(file_bytes: bytes, file_ext: str):
     raise ValueError("Unsupported file type. Use PDF, DOCX, or TXT.")
 
 
-def _extract_clauses(text_data):
+def _extract_clauses(text_data, source: str = "final", id_start: int = 0):
     import re
 
     clauses = []
-    clause_id = 0
+    clause_id = id_start
 
     for chunk in text_data:
         raw_text = chunk.get("text", "")
@@ -111,6 +111,7 @@ def _extract_clauses(text_data):
                     "text": cleaned,
                     "page": page_num,
                     "line": line_no,
+                    "source": source,
                 }
             )
             clause_id += 1
@@ -207,6 +208,19 @@ def _threshold_for_mode(scan_mode: str) -> float:
     return 0.60
 
 
+def _is_supported_ext(file_ext: str) -> bool:
+    return file_ext in {"pdf", "docx", "txt"}
+
+
+def _source_label(source: str) -> str:
+    if source == "final":
+        return "Final"
+    if source.startswith("reference_"):
+        idx = source.split("_")[-1]
+        return f"Reference {idx}"
+    return source.title()
+
+
 def _normalized_clause_text(text: str) -> str:
     import re
 
@@ -262,7 +276,7 @@ def _rule_based_category(text_a: str, text_b: str, similarity: float):
     return (None, None, 0.0, "")
 
 
-def _analyze_clauses(clauses, threshold: float):
+def _analyze_clauses(clauses, threshold: float, focus_source: str = "final"):
     if str(PROJECT_ROOT) not in sys.path:
         sys.path.append(str(PROJECT_ROOT))
 
@@ -302,6 +316,14 @@ def _analyze_clauses(clauses, threshold: float):
 
             clause_a = clauses[i]
             clause_b = clauses[j]
+            source_a = str(clause_a.get("source", "final"))
+            source_b = str(clause_b.get("source", "final"))
+            # Compare only pairs involving final/focus doc:
+            # - final vs final
+            # - final vs reference
+            if source_a != focus_source and source_b != focus_source:
+                continue
+
             similarity = _similarity(clause_a["text"], clause_b["text"])
 
             category, label, confidence, reason = _rule_based_category(
@@ -344,6 +366,10 @@ def _analyze_clauses(clauses, threshold: float):
                     "clause2": clause_b["text"],
                     "location1": f"Pg {clause_a['page']}, Ln {clause_a['line']}",
                     "location2": f"Pg {clause_b['page']}, Ln {clause_b['line']}",
+                    "source1": source_a,
+                    "source2": source_b,
+                    "sourceLabel1": _source_label(source_a),
+                    "sourceLabel2": _source_label(source_b),
                     "page1": clause_a["page"],
                     "line1": clause_a["line"],
                     "page2": clause_b["page"],
@@ -352,7 +378,8 @@ def _analyze_clauses(clauses, threshold: float):
             )
             counts[category] += 1
             for clause in (clause_a, clause_b):
-                line_key = (category, clause["page"], clause["line"], label)
+                source = str(clause.get("source", "final"))
+                line_key = (category, source, clause["page"], clause["line"], label)
                 if line_key in seen_line_issues:
                     continue
                 seen_line_issues.add(line_key)
@@ -363,7 +390,9 @@ def _analyze_clauses(clauses, threshold: float):
                         "confidence": round(float(confidence), 4),
                         "page": clause["page"],
                         "line": clause["line"],
-                        "location": f"Pg {clause['page']}, Ln {clause['line']}",
+                        "source": source,
+                        "sourceLabel": _source_label(source),
+                        "location": f"{_source_label(source)} - Pg {clause['page']}, Ln {clause['line']}",
                         "reason": reason,
                     }
                 )
@@ -638,35 +667,56 @@ def login():
 @app.post("/api/analyze")
 def analyze():
     uploaded = request.files.get("file")
+    reference_uploads = request.files.getlist("referenceFiles")
     scan_mode = request.form.get("scanMode", "Standard Scan (Recommended)")
     threshold = _threshold_for_mode(scan_mode)
 
     if uploaded is None or uploaded.filename is None or uploaded.filename.strip() == "":
-        return jsonify({"error": "Please upload a file."}), 400
+        return jsonify({"error": "Please upload the final document file."}), 400
 
     file_ext = uploaded.filename.rsplit(".", 1)[-1].lower() if "." in uploaded.filename else ""
-    if file_ext not in {"pdf", "docx", "txt"}:
+    if not _is_supported_ext(file_ext):
         return jsonify({"error": "Unsupported file type. Use PDF, DOCX, or TXT."}), 400
+    if len(reference_uploads) > 2:
+        return jsonify({"error": "You can upload up to 2 reference documents."}), 400
 
     try:
-        file_bytes = uploaded.read()
-        text_data = _extract_text_data(file_bytes=file_bytes, file_ext=file_ext)
-        if not text_data:
-            return jsonify({"error": "Could not extract text from file."}), 400
+        final_file_bytes = uploaded.read()
+        final_text_data = _extract_text_data(file_bytes=final_file_bytes, file_ext=file_ext)
+        if not final_text_data:
+            return jsonify({"error": "Could not extract text from final document."}), 400
 
-        clauses = _extract_clauses(text_data)
-        if len(clauses) < 2:
-            return jsonify({"error": "Not enough clauses found for analysis."}), 400
+        final_clauses = _extract_clauses(final_text_data, source="final", id_start=0)
+        if len(final_clauses) < 2:
+            return jsonify({"error": "Not enough clauses found in final document for analysis."}), 400
 
-        parties = _extract_document_parties(text_data)
+        all_clauses = list(final_clauses)
+        for idx, ref in enumerate(reference_uploads, start=1):
+            if ref is None or ref.filename is None or ref.filename.strip() == "":
+                continue
+            ref_ext = ref.filename.rsplit(".", 1)[-1].lower() if "." in ref.filename else ""
+            if not _is_supported_ext(ref_ext):
+                return jsonify({"error": f"Unsupported reference file type for {ref.filename}."}), 400
+            ref_text_data = _extract_text_data(file_bytes=ref.read(), file_ext=ref_ext)
+            if not ref_text_data:
+                continue
+            ref_clauses = _extract_clauses(
+                ref_text_data,
+                source=f"reference_{idx}",
+                id_start=len(all_clauses),
+            )
+            all_clauses.extend(ref_clauses)
+
+        parties = _extract_document_parties(final_text_data)
         findings, line_issues, counts, compared_pairs = _analyze_clauses(
-            clauses=clauses, threshold=threshold
+            clauses=all_clauses, threshold=threshold, focus_source="final"
         )
+        final_line_issues = [item for item in line_issues if item.get("source") == "final"]
         page_summaries = _build_page_summaries(
-            clauses=clauses, line_issues=line_issues, text_data=text_data
+            clauses=final_clauses, line_issues=final_line_issues, text_data=final_text_data
         )
         detailed_summary = _build_detailed_summary(
-            clauses=clauses,
+            clauses=final_clauses,
             page_summaries=page_summaries,
             findings=findings,
         )
@@ -682,7 +732,8 @@ def analyze():
                     "threshold": threshold,
                     "vendor": parties["vendor"],
                     "vendee": parties["vendee"],
-                    "clauses": len(clauses),
+                    "clauses": len(final_clauses),
+                    "referenceDocs": len([r for r in reference_uploads if r and r.filename]),
                     "pairsCompared": compared_pairs,
                     "issuesFound": len(findings),
                     "duplicationCount": counts["duplication"],
@@ -693,6 +744,7 @@ def analyze():
                 "detailedSummary": detailed_summary,
                 "findings": findings[:50],
                 "lineIssues": line_issues[:200],
+                "finalLineIssues": final_line_issues[:200],
             }
         ),
         200,

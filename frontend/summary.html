@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Final Summary | LegalSI</title>
+    <title>Summary | LegalSI</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -18,8 +18,9 @@
         <a class="brand" href="index.html#home">LegalSI</a>
         <div class="page-links">
           <a class="page-link" href="upload.html">Upload</a>
-          <a class="page-link" href="issues.html">Issue Analysis</a>
-          <a class="page-link active" href="summary.html">Final Summary</a>
+          <a class="page-link" href="issues.html">Analysis</a>
+          <a class="page-link active" href="summary.html">Summary</a>
+          <a class="page-link" href="dashboard.html">Dashboard</a>
           <button id="logoutBtn" class="logout-btn" type="button">Logout</button>
         </div>
       </div>
@@ -28,7 +29,7 @@
     <main class="flow-main">
       <section class="container flow-card">
         <div class="upload-header">
-          <h1>Final Document Summary</h1>
+          <h1>Document Summary</h1>
           <span id="userBadge" class="user-badge"></span>
         </div>
         <p class="upload-subtitle">Overall analysis result for the entire uploaded legal document.</p>
@@ -42,14 +43,10 @@
         <div id="pageSummaryBoard" class="result-list"></div>
         <h3 class="section-subtitle">Top Findings</h3>
         <div id="findingsBoard" class="result-list"></div>
-        <h3 class="section-subtitle">Line Error Dashboard</h3>
-        <article class="result-card">
-          <div id="lineErrorDashboard"></div>
-        </article>
 
         <div class="workflow-actions">
-          <a class="secondary-btn as-link" href="issues.html">Back to Issue Analysis</a>
-          <a class="submit-btn as-link submit-link" href="upload.html">Analyze New Document</a>
+          <a class="secondary-btn as-link" href="issues.html">Back to Analysis</a>
+          <a class="submit-btn as-link submit-link" href="dashboard.html">Next: Dashboard</a>
         </div>
       </section>
     </main>
